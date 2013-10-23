@@ -10,12 +10,12 @@
 //
 // University of Virginia - cs4414 Fall 2013
 // Weilin Xu and David Evans
-// Version 0.1
+// Version 0.2
 
 extern mod extra;
 
 use std::rt::io::*;
-use std::rt::io::net::ip::{SocketAddr, Ipv4Addr};
+use std::rt::io::net::ip::SocketAddr;
 use std::io::println;
 use std::cell::Cell;
 use std::{os, str, io};
@@ -25,11 +25,8 @@ use std::comm::*;
 use std::rt::io::net::tcp::TcpStream;
 
 static PORT: int = 4414;
-//static IPV4_LOOPBACK: &'static str = "127.0.0.1";
+static IP: &'static str = "0.0.0.0"; 
 
-static IPV4_LOOPBACK: &'static str = "0.0.0.0";  // @@@@@
-
-//static mut visitor_count: uint = 0;
 
 struct sched_msg {
     stream: Option<std::rt::io::net::tcp::TcpStream>,
@@ -39,13 +36,6 @@ struct sched_msg {
 
 fn main() {
  
-    // @@@@@@@@@@@@@@@@@@@@@@@@@@
-
-    let ip = match FromStr::from_str(IPV4_LOOPBACK) { Some(ip) => ip,
-					   	      None     => {println(fmt!("Error: Invalid IP address <%s>", IPV4_LOOPBACK));
-						      		   return;}
- 					 	    };
-
     let visitor_count: uint = 0; // @@@@@@@ 
 
     let req_vec: ~[sched_msg] = ~[];
@@ -56,6 +46,11 @@ fn main() {
     let (port, chan) = stream();
     let chan = SharedChan::new(chan);
     
+
+    /* IMPORTANT NOTE: 	Weilin's new code for this adding file requests ('do spawn' part) is buggy. 
+			So don't change the code right below ! 
+    */
+
     // add file requests into queue.
     do spawn {
         while(true) {
@@ -68,25 +63,39 @@ fn main() {
     }
     
     // take file requests from queue, and send a response.
+    // FIFO
     do spawn {
-        while(true) {
+        loop {
             do take_vec.write |vec| {
-                let mut tf = (*vec).pop();
-                
-                match io::read_whole_file(tf.filepath) {
-                    Ok(file_data) => {
-                        tf.stream.write(file_data);
-                    }
-                    Err(err) => {
-                        println(err);
+                if ((*vec).len() > 0) {
+                    // FILO didn't make sense in service scheduling, so we modify it as FIFO by using shift_opt() rather than pop().
+                    let tf_opt: Option<sched_msg> = (*vec).shift_opt();
+                    let mut tf = tf_opt.unwrap();
+                    println(fmt!("shift from queue, size: %ud", (*vec).len()));
+
+                    match io::read_whole_file(tf.filepath) { // killed if file size is larger than memory size.
+                        Ok(file_data) => {
+                            println(fmt!("begin serving file [%?]", tf.filepath));
+                            // A web server should always reply a HTTP header for any legal HTTP request.
+                            tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
+                            tf.stream.write(file_data);
+                            println(fmt!("finish file [%?]", tf.filepath));
+                        }
+                        Err(err) => {
+                            println(err);
+                        }
                     }
                 }
             }
         }
     }
+
+    let ip = match FromStr::from_str(IP) { Some(ip) => ip,
+					   None     => {println(fmt!("Error: Invalid IP address <%s>", IP));
+						        return;}
+ 					 };
     
-    //let socket = net::tcp::TcpListener::bind(SocketAddr {ip: Ipv4Addr(127,0,0,1), port: PORT as u16}); 
-    let socket = net::tcp::TcpListener::bind(SocketAddr {ip: ip, port: PORT as u16}); //@@@@@@@@@@
+    let socket = net::tcp::TcpListener::bind(SocketAddr {ip: ip, port: PORT as u16}); 
 
     println(fmt!("Listening on tcp port %d ...", PORT));
     let mut acceptor = socket.listen().unwrap();
@@ -104,8 +113,8 @@ fn main() {
 		Some(ref mut s) => 
 		{
 			match s.peer_name() 
-			{	Some(pn) => { println( fmt!("Peer address: %s \n", pn.to_str() ));},					
-				None => ()
+			{	Some(pn) => { println( fmt!("\nPeer address: %s", pn.to_str() ));},					
+				None 	 => ()
 			}
 		}
 		None => ()
@@ -121,15 +130,13 @@ fn main() {
         let child_chan = chan.clone();
 
         do spawn {
-    
-            // unsafe {visitor_count += 1;}
-        
+       
 	    let shared_count_copy = count_port.recv(); // @@@@@@
 
 	    /* Get Write Access */	    	    
 	    do shared_count_copy.write |count|{        
 			*count = *count + 1;
-			println( fmt!("count: %? \n", *count as int) );			
+			println( fmt!("\ncount: %? \n", *count as int) );			
     	    }
 	   	        	        	    
             let mut stream = stream.take();
@@ -149,22 +156,6 @@ fn main() {
                 if !os::path_exists(file_path) || os::path_is_dir(file_path)
 		{
                     println(fmt!("Request received:\n%s", request_str));
-
-		    /*
-                    let response: ~str = fmt!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
-			<doctype !html><html>
-			<head><title>Hello, Rust!</title>
-			<style> body { background-color: #111; color: #FFEEAA }
-				h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
-				h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
-			</style>
-			</head>
-			<body>
-				<h1>Greetings, Krusty!</h1>
-				<h2>Visitor count: %u</h2>
-			</body></html>\r\n", unsafe{visitor_count});
-		     */
 
 		    /* Get Read Access */
 		    do shared_count_copy.read |count|
@@ -196,7 +187,7 @@ fn main() {
                     println(fmt!("get file request: %?", file_path));
                 }
             }
-            println!("connection terminates")
+            println!("connection terminates\n")
         }
     }
 }
