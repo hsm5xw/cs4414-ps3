@@ -38,10 +38,8 @@ struct sched_msg {
 fn is_Wahoo_Client(peer_addr: ~str) ->bool
 {
 	let WahooIPs: ~[~str] = ~[~"128.143.", ~"137.54."]; // probably add some more ip addresses on the way
-
-	let mut index = 0;
-
 	let mut isWahoo = false;
+	let mut index = 0;
 
 	while index < WahooIPs.len()
 	{
@@ -53,10 +51,30 @@ fn is_Wahoo_Client(peer_addr: ~str) ->bool
 		index += 1;
 	}
 	//println( fmt!("is wahoo? : %?\n", isWahoo) );
-
 	return isWahoo;
 }
 
+// get the size of a file
+
+fn get_fileSize(file_path: &Path) -> int
+{
+	let mut filestream = std::rt::io::file::open(file_path, Open, Read);
+	let mut size:int = 0;
+
+	// find the File size
+	match filestream{
+		Some(ref mut reader) => 
+		{									
+			reader.seek(0,SeekEnd);
+			size = reader.tell() as int;
+			reader.seek(0, SeekSet); // rewind the file back
+
+			println(fmt!("\nfile size: %? bytes \n", size )); 
+		},
+		None => { fail!("\nCannot read the storage file \n");},
+	}
+	return size;	
+}
 
 
 fn main() {
@@ -140,11 +158,11 @@ fn main() {
 	match stream {
 		Some(ref mut s) => 
 		{
-			match s.peer_name() 
-			{	Some(pn) => { 	
-						peer_addr = pn.to_str();
-						println( fmt!("\nPeer address: %s", peer_addr ));					
-					    },					
+			match s.peer_name() {	
+				Some(pn) => 
+				{ 	peer_addr = pn.to_str();
+					println( fmt!("\nPeer address: %s", peer_addr ));					
+				},					
 				None 	 => ()
 			}
 		}
@@ -216,6 +234,8 @@ fn main() {
                 }
                 else {
                     // may do scheduling here
+	    
+		    let size:int = get_fileSize(file_path);
 
                     let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone()};
                     child_chan.send(msg);
