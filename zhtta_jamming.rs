@@ -27,16 +27,43 @@ use std::rt::io::net::tcp::TcpStream;
 static PORT: int = 4414;
 static IP: &'static str = "0.0.0.0"; 
 
-
 struct sched_msg {
     stream: Option<std::rt::io::net::tcp::TcpStream>,
     filepath: ~std::path::PosixPath
 }
 
 
+// determine if the request is from a Charlottesville client
+
+fn is_Wahoo_Client(peer_addr: ~str) ->bool
+{
+	let WahooIPs: ~[~str] = ~[~"128.143.", ~"137.54."]; // probably add some more ip addresses on the way
+
+	let mut index = 0;
+
+	let mut isWahoo = false;
+
+	while index < WahooIPs.len()
+	{
+		if peer_addr.starts_with(WahooIPs[index])
+		{
+			isWahoo = true;
+			break;
+		}
+		index += 1;
+	}
+	//println( fmt!("is wahoo? : %?\n", isWahoo) );
+
+	return isWahoo;
+}
+
+
+
 fn main() {
  
     let visitor_count: uint = 0; // @@@@@@@ 
+
+    let mut isWahoo: bool = false;
 
     let req_vec: ~[sched_msg] = ~[];
     let shared_req_vec = arc::RWArc::new(req_vec);
@@ -108,17 +135,26 @@ fn main() {
 
     for stream in acceptor.incoming() {
 	let mut stream = stream; // @@@@@@ 
-	
+	let mut peer_addr: ~str = ~"";	
+
 	match stream {
 		Some(ref mut s) => 
 		{
 			match s.peer_name() 
-			{	Some(pn) => { println( fmt!("\nPeer address: %s", pn.to_str() ));},					
+			{	Some(pn) => { 	
+						peer_addr = pn.to_str();
+						println( fmt!("\nPeer address: %s", peer_addr ));					
+					    },					
 				None 	 => ()
 			}
 		}
 		None => ()
 	} 			// @@@@@
+
+	isWahoo = is_Wahoo_Client(peer_addr); 
+
+	println( fmt!("is wahoo? : %?\n", isWahoo) );
+
 
 	let stream = Cell::new(stream);
 
@@ -136,7 +172,7 @@ fn main() {
 	    /* Get Write Access */	    	    
 	    do shared_count_copy.write |count|{        
 			*count = *count + 1;
-			println( fmt!("\ncount: %? \n", *count as int) );			
+			println( fmt!("count: %? \n", *count as int) );			
     	    }
 	   	        	        	    
             let mut stream = stream.take();
