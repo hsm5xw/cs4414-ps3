@@ -98,13 +98,15 @@ fn main() {
     // FIFO
     do spawn {
         let (sm_port, sm_chan) = stream();
-        
+        let (sm_port2, sm_chan2) = stream();
         // a task for sending responses.
         do spawn {
 	    let mut cache: HashMap<~str, ~[u8]> = std::hashmap::HashMap::new();
 	    let mut cacheTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
             loop {
+		sm_chan2.send(1);
                 let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
+		
 		let modifiedTime = match file::stat(tf.filepath) {
 			Some(s) => {
 					s.modified
@@ -143,6 +145,7 @@ fn main() {
         }
         
         loop {
+	    sm_port2.recv();
             port.recv(); // wait for arrving notification
             do take_vec.write |vec| {
                 if ((*vec).len() > 0) {
