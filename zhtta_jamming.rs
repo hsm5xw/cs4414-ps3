@@ -20,7 +20,9 @@ use std::io::println;
 use std::cell::Cell;
 use std::{os, str, io};
 use extra::arc;
+use extra::time;
 use std::comm::*;
+use std::hashmap::HashMap;
 
 use std::rt::io::net::tcp::TcpStream;
 
@@ -99,20 +101,44 @@ fn main() {
         
         // a task for sending responses.
         do spawn {
+	    let mut cache: HashMap<~str, ~[u8]> = std::hashmap::HashMap::new();
+	    let mut cacheTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
             loop {
                 let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
-                match io::read_whole_file(tf.filepath) { // killed if file size is larger than memory size.
-                    Ok(file_data) => {
-                        println(fmt!("begin serving file [%?]", tf.filepath));
+		let modifiedTime = match file::stat(tf.filepath) {
+			Some(s) => {
+					s.modified
+				   }
+			None => {
+					-1
+				}
+		};
+		if cache.contains_key_equiv(&tf.filepath.to_str()) && 
+				*cacheTimes.get_copy(&tf.filepath.to_str()) as u64 > modifiedTime {
+			println(fmt!("begin serving file [%?]", tf.filepath));
                         // A web server should always reply a HTTP header for any legal HTTP request.
                         tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
-                        tf.stream.write(file_data);
+			let data = cache.get_copy(&tf.filepath.to_str());
+                        tf.stream.write(data);
                         println(fmt!("finish file [%?]", tf.filepath));
+		}
+		else {
+		     let file = io::read_whole_file(tf.filepath);
+   	             match file { // killed if file size is larger than memory size.
+                	    Ok(file_data) => {
+                 	       println(fmt!("begin serving file [%?]", tf.filepath));
+                 	       // A web server should always reply a HTTP header for any legal HTTP request.
+                 	       tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
+                        	tf.stream.write(file_data);
+                        	println(fmt!("finish file [%?]", tf.filepath));
+				cache.insert(tf.filepath.to_str(), file_data);
+				cacheTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+                    	    }
+                    	    Err(err) => {
+                        	println(err);
+                    	    }
                     }
-                    Err(err) => {
-                        println(err);
-                    }
-                }
+		}
             }
         }
         
