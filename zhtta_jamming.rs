@@ -25,13 +25,26 @@ use std::comm::*;
 use std::hashmap::HashMap;
 
 use std::rt::io::net::tcp::TcpStream;
+use std::cmp::Ord;
+
+use extra::priority_queue::*;
 
 static PORT: int = 4414;
-static IP: &'static str = "127.0.0.1"; 
+static IP: &'static str = "127.0.0.1";
+
 
 struct sched_msg {
     stream: Option<std::rt::io::net::tcp::TcpStream>,
-    filepath: ~std::path::PosixPath
+    filepath: ~std::path::PosixPath,
+    priority: uint  // @@@@@@@@@@@@@@@
+}
+
+impl std::cmp::Ord for sched_msg
+{
+	fn lt(&self, other: &sched_msg) -> bool { (*self).priority < (*other).priority }
+	fn le(&self, other: &sched_msg) -> bool { (*self).priority <= (*other).priority }
+	fn ge(&self, other: &sched_msg) -> bool { (*self).priority >= (*other).priority }
+	fn gt(&self, other: &sched_msg) -> bool { (*self).priority > (*other).priority } 
 }
 
 
@@ -39,57 +52,67 @@ struct sched_msg {
 
 fn is_Wahoo_Client(peer_addr: ~str) ->bool
 {
-	let WahooIPs: ~[~str] = ~[~"128.143.", ~"137.54."]; // probably add some more ip addresses on the way
-	let mut isWahoo = false;
-	let mut index = 0;
+        let WahooIPs: ~[~str] = ~[~"128.143.", ~"137.54."]; // probably add some more ip addresses on the way
+        let mut isWahoo = false;
+        let mut index = 0;
 
-	while index < WahooIPs.len()
-	{
-		if peer_addr.starts_with(WahooIPs[index])
-		{
-			isWahoo = true;
-			break;
-		}
-		index += 1;
-	}
-	//println( fmt!("is wahoo? : %?\n", isWahoo) );
-	return isWahoo;
+        while index < WahooIPs.len()
+        {
+                if peer_addr.starts_with(WahooIPs[index])
+                {
+                        isWahoo = true;
+                        break;
+                }
+                index += 1;
+        }
+        //println( fmt!("is wahoo? : %?\n", isWahoo) );
+        return isWahoo;
 }
 
 // get the size of a file
 
 fn get_fileSize(file_path: &Path) -> int
 {
-	let mut filestream = std::rt::io::file::open(file_path, Open, Read);
-	let mut size:int = 0;
+        let mut filestream = std::rt::io::file::open(file_path, Open, Read);
+        let mut size:int = 0;
 
-	// find the File size
-	match filestream{
-		Some(ref mut reader) => 
-		{									
-			reader.seek(0,SeekEnd);
-			size = reader.tell() as int;
-			reader.seek(0, SeekSet); // rewind the file back
+        // find the File size
+        match filestream{
+                Some(ref mut reader) =>
+                {                                                                        
+                        reader.seek(0,SeekEnd);
+                        size = reader.tell() as int;
+                        reader.seek(0, SeekSet); // rewind the file back
 
-			println(fmt!("\nfile size: %? bytes \n", size )); 
-		},
-		None => { fail!("\nCannot read the storage file \n");},
-	}
-	return size;	
+                        println(fmt!("\nfile size: %? bytes \n", size ));
+                },
+                None => { fail!("\nCannot read the storage file \n");},
+        }
+        return size;        
 }
 
 
 fn main() {
  
-    let visitor_count: uint = 0; // @@@@@@@ 
+    let visitor_count: uint = 0; // @@@@@@@
 
     let mut isWahoo: bool = false;
 
+/*
     let req_vec: ~[sched_msg] = ~[];
     let shared_req_vec = arc::RWArc::new(req_vec);
     let add_vec = shared_req_vec.clone();
     let take_vec = shared_req_vec.clone();
-    
+*/
+
+    /* replace data structure to priority queue (this is not the only region changed though) */
+
+    let req_pq: PriorityQueue<sched_msg> = PriorityQueue::new();
+    let shared_req_pq = arc::RWArc::new(req_pq);
+    let add_pq = shared_req_pq.clone();
+    let take_pq = shared_req_pq.clone();
+   
+
     let (port, chan) = stream();
     let chan = SharedChan::new(chan);
     
@@ -97,73 +120,78 @@ fn main() {
     // dequeue file requests, and send responses.
     // FIFO
     do spawn {
-        let (sm_port, sm_chan) = stream();
-        let (sm_port2, sm_chan2) = stream();
-        // a task for sending responses.
-        do spawn {
-	    let mut cache: HashMap<~str, ~[u8]> = std::hashmap::HashMap::new();
-	    let mut cacheTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
-            loop {
-		sm_chan2.send(1);
-                let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
-		
-		let modifiedTime = match file::stat(tf.filepath) {
-			Some(s) => {
-					s.modified
-				   }
-			None => {
-					-1
-				}
-		};
-		if cache.contains_key_equiv(&tf.filepath.to_str()) && 
-				*cacheTimes.get_copy(&tf.filepath.to_str()) as u64 > modifiedTime {
-			println(fmt!("begin serving file [%?]", tf.filepath));
-                        // A web server should always reply a HTTP header for any legal HTTP request.
-                        tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
-			let data = cache.get_copy(&tf.filepath.to_str());
-                        tf.stream.write(data);
-                        println(fmt!("finish file [%?]", tf.filepath));
-		}
-		else {
-		     let file = io::read_whole_file(tf.filepath);
-   	             match file { // killed if file size is larger than memory size.
-                	    Ok(file_data) => {
-                 	       println(fmt!("begin serving file [%?]", tf.filepath));
-                 	       // A web server should always reply a HTTP header for any legal HTTP request.
-                 	       tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
-                        	tf.stream.write(file_data);
-                        	println(fmt!("finish file [%?]", tf.filepath));
-				cache.insert(tf.filepath.to_str(), file_data);
-				cacheTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
-                    	    }
-                    	    Err(err) => {
-                        	println(err);
-                    	    }
-                    }
-		}
-            }
-        }
+        	let (sm_port, sm_chan) = stream();
+        	let (sm_port2, sm_chan2) = stream();
+
+        	// a task for sending responses.
+        	do spawn {
+         		let mut cache: HashMap<~str, ~[u8]> = std::hashmap::HashMap::new();
+         		let mut cacheTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
+
+            		loop {
+                		sm_chan2.send(1);
+               			let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
+                
+                		let modifiedTime = match file::stat(tf.filepath)
+				{
+                        		Some(s) => {s.modified}
+                        		None 	=> {-1} 
+				};
+
+                		if cache.contains_key_equiv(&tf.filepath.to_str()) &&
+                           		*cacheTimes.get_copy(&tf.filepath.to_str()) as u64 > modifiedTime 
+				{	
+					println(fmt!("begin serving file [%?]", tf.filepath));
+                        		// A web server should always reply a HTTP header for any legal HTTP request.
+                        		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
+                        		let data = cache.get_copy(&tf.filepath.to_str());
+                        		tf.stream.write(data);
+                        		println(fmt!("finish file [%?]", tf.filepath));
+                		}
+                		else {
+                 			let file = io::read_whole_file(tf.filepath);
+
+            	 			match file { // killed if file size is larger than memory size.
+
+                         			Ok(file_data) => 
+						{
+                          				println(fmt!("begin serving file [%?]", tf.filepath));
+                          				// A web server should always reply a HTTP header for any legal HTTP request.
+                          				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
+                                			tf.stream.write(file_data);
+                                			println(fmt!("finish file [%?]", tf.filepath));
+                                			cache.insert(tf.filepath.to_str(), file_data);
+                                			cacheTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+                             			}
+                             			Err(err) => 
+						{	println(err);
+						}
+                    			} 
+                		} // else
+           		} // loop
+        	} // spawn (inner)
         
         loop {
 	    sm_port2.recv();
             port.recv(); // wait for arrving notification
-            do take_vec.write |vec| {
-                if ((*vec).len() > 0) {
+            do take_pq.write |priority_Q| {
+                if ((*priority_Q).len() > 0) {
                     // LIFO didn't make sense in service scheduling, so we modify it as FIFO by using shift_opt() rather than pop().
-                    let tf_opt: Option<sched_msg> = (*vec).shift_opt();
-                    let tf = tf_opt.unwrap();
-                    println(fmt!("shift from queue, size: %ud", (*vec).len()));
+                    
+		    //let tf_opt: Option<sched_msg> = (*priority_Q).pop();
+                    let tf = (*priority_Q).pop();
+                    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));    // ^^^^^^^^^^^^^^^^^^^ probably need to change it later
                     sm_chan.send(tf); // send the request to send-response-task to serve.
                 }
             }
         }
-    }
+    } // spawn (outer)
 
 
     let ip = match FromStr::from_str(IP) { Some(ip) => ip,
-					   None     => {println(fmt!("Error: Invalid IP address <%s>", IP));
-						        return;}
- 					 };
+                                           None     => {println(fmt!("Error: Invalid IP address <%s>", IP));
+                                                    	return;}
+                                         };
     
 
     let socket = net::tcp::TcpListener::bind(SocketAddr {ip: ip, port: PORT as u16});
@@ -172,51 +200,51 @@ fn main() {
     let mut acceptor = socket.listen().unwrap();
 
 
-    let shared_count = arc::RWArc::new( visitor_count ); // @@@@@@  
+    let shared_count = arc::RWArc::new( visitor_count ); // @@@@@@
 
 
     for stream in acceptor.incoming() {
-	let mut stream = stream; // @@@@@@ 
-	let mut peer_addr: ~str = ~"";	
+        let mut stream = stream; // @@@@@@
+        let mut peer_addr: ~str = ~"";        
 
-	match stream {
-		Some(ref mut s) => 
-		{
-			match s.peer_name() {	
-				Some(pn) => 
-				{ 	peer_addr = pn.to_str();
-					println( fmt!("\nPeer address: %s", peer_addr ));					
-				},					
-				None 	 => ()
-			}
-		}
-		None => ()
-	} 			// @@@@@
+        match stream {
+                Some(ref mut s) =>
+                {
+                        match s.peer_name() {        
+                                Some(pn) =>
+                                {   peer_addr = pn.to_str();
+                                    println( fmt!("\nPeer address: %s", peer_addr ));                                        
+                                },                                        
+                                None     => ()
+                        }
+                }
+                None => ()
+        }                         
 
-	isWahoo = is_Wahoo_Client(peer_addr); 
-	println( fmt!("is wahoo? : %?\n", isWahoo) );
+        isWahoo = is_Wahoo_Client(peer_addr);
+        println( fmt!("is wahoo? : %?\n", isWahoo) );
 
 
-	let stream = Cell::new(stream);
+        let stream = Cell::new(stream);
 
-	let (count_port, count_chan): (Port< extra::arc::RWArc<uint> >, Chan< extra::arc::RWArc<uint> >) = std::comm::stream(); // @@@@@@   
-        let count_chan = SharedChan::new(count_chan); // @@@@@@ 
+        let (count_port, count_chan): (Port< extra::arc::RWArc<uint> >, Chan< extra::arc::RWArc<uint> >) = std::comm::stream(); // @@@@@@
+        let count_chan = SharedChan::new(count_chan); // @@@@@@
         count_chan.send(shared_count.clone() ); // @@@@@@
 
         // Start a new task to handle the connection
         let child_chan = chan.clone();
-	let child_add_vec = add_vec.clone();
+        let child_add_pq = add_pq.clone();
 
         do spawn {
        
-	    let shared_count_copy = count_port.recv(); // @@@@@@
+         let shared_count_copy = count_port.recv(); // @@@@@@
 
-	    /* Get Write Access */	    	    
-	    do shared_count_copy.write |count|{        
-			*count = *count + 1;
-			println( fmt!("count: %? \n", *count as int) );			
-    	    }
-	   	        	        	    
+         /* Get Write Access */                 
+         do shared_count_copy.write |count|{
+                        *count = *count + 1;
+                        println( fmt!("count: %? \n", *count as int) );                        
+         }
+                                   
             let mut stream = stream.take();
             let mut buf = [0, ..500];
             stream.read(buf);
@@ -230,42 +258,45 @@ fn main() {
                 let file_path = ~os::getcwd().push(path.replace("/../", ""));
 
                 if !os::path_exists(file_path) || os::path_is_dir(file_path)
-		{
+                {
                     println(fmt!("Request received:\n%s", request_str));
 
-		    /* Get Read Access */
-		    do shared_count_copy.read |count|
-		    {			
-   			let response: ~str = fmt!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
-			<doctype !html><html>
-			<head><title>Hello, Rust!</title>
-			<style> body { background-color: #111; color: #FFEEAA }
-				h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
-				h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
-			</style>
-			</head>
-			<body>
-				<h1>Greetings, Krusty!</h1>
-				<h2>Visitor count: %u</h2>
-			</body></html>\r\n", *count);	
-
-			stream.write(response.as_bytes());	
-    	    	    }
+                 	/* Get Read Access */
+                	 do shared_count_copy.read |count|
+                 	{                        
+                           	let response: ~str = fmt!(
+                        	"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
+                        	<doctype !html><html>
+                        	<head><title>Hello, Rust!</title>
+                        	<style> body { background-color: #111; color: #FFEEAA }
+                               	 	h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
+                                	h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
+                        	</style>
+                        	</head>
+                        	<body>
+                                	<h1>Greetings, Krusty!</h1>
+                                	<h2>Visitor count: %u</h2>
+                        	</body></html>\r\n", *count);        
+                        	stream.write(response.as_bytes());        
+                     	 }
 
                 }
                 else {
                     // Requests scheduling
 
-		    let size:int = get_fileSize(file_path); // @@@@@@@@@@@
+                    let size:int = get_fileSize(file_path); // @@@@@@@@@@@
 
-                    let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone()};
+		    // ************ NOTE: Priority of the below message should be changed to take the lg() and multiply it by (-1), 
+                    // ************       but for now I keep it simple and just store the file size 
+
+                    let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone(), priority: size as uint}; // NOTE
+
                     let (sm_port, sm_chan) = std::comm::stream();
                     sm_chan.send(msg);
                     
-                    do child_add_vec.write |vec| {
+                    do child_add_pq.write |priority_Q| {
                         let msg = sm_port.recv();
-                        (*vec).push(msg); // enqueue new request.
+                        (*priority_Q).push(msg); // enqueue new request.
                         println("add to queue");
                     }
                     child_chan.send(""); //notify the new arriving request.
@@ -277,5 +308,6 @@ fn main() {
         }
     }
 }
+
 
 
