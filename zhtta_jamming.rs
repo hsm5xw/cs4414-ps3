@@ -26,6 +26,7 @@ use std::hashmap::HashMap;
 
 use std::rt::io::net::tcp::TcpStream;
 use std::cmp::Ord;
+use std::num::log2;
 
 use extra::priority_queue::*;
 
@@ -36,7 +37,7 @@ static IP: &'static str = "127.0.0.1";
 struct sched_msg {
     stream: Option<std::rt::io::net::tcp::TcpStream>,
     filepath: ~std::path::PosixPath,
-    priority: uint  // @@@@@@@@@@@@@@@
+    priority: int  // @@@@@@@@@@@@@@@
 }
 
 impl std::cmp::Ord for sched_msg
@@ -95,8 +96,6 @@ fn get_fileSize(file_path: &Path) -> int
 fn main() {
  
     let visitor_count: uint = 0; // @@@@@@@
-
-    let mut isWahoo: bool = false;
 
 /*
     let req_vec: ~[sched_msg] = ~[];
@@ -221,9 +220,8 @@ fn main() {
                 None => ()
         }                         
 
-        isWahoo = is_Wahoo_Client(peer_addr);
+        let isWahoo: bool = is_Wahoo_Client(peer_addr);
         println( fmt!("is wahoo? : %?\n", isWahoo) );
-
 
         let stream = Cell::new(stream);
 
@@ -284,16 +282,20 @@ fn main() {
                 else {
                     // Requests scheduling
 
-                    let size:int = get_fileSize(file_path); // @@@@@@@@@@@
+                    let file_size:int = get_fileSize(file_path); // @@@@@@@@@@@
 
-		    // ************ NOTE: Priority of the below message should be changed to take the lg() and multiply it by (-1), 
-                    // ************       but for now I keep it simple and just store the file size 
+		    // Rust 0.8 only provides a maximum priority queue
+		    let mut adjusted_priority: int = (-1) * (log2( file_size as float) as int); // multiply priority by (-1) to use it as minimum priority queue
 
-                    let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone(), priority: size as uint}; // NOTE
+		    // Implement 'Wahoo-First' scheduling
+		    if(isWahoo) { adjusted_priority += 3;}
+
+                    let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone(), priority: adjusted_priority }; 
 
                     let (sm_port, sm_chan) = std::comm::stream();
                     sm_chan.send(msg);
                     
+		    // Implement 'Shortest-Processing-Time-First' scheduling
                     do child_add_pq.write |priority_Q| {
                         let msg = sm_port.recv();
                         (*priority_Q).push(msg); // enqueue new request.
