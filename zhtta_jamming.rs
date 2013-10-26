@@ -126,7 +126,9 @@ fn main() {
         	do spawn {
          		let mut cache: HashMap<~str, ~[u8]> = std::hashmap::HashMap::new();
          		let mut cacheTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
-
+			let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
+	   		let maxCacheSize = 2;
+	    		let maxCacheFileSize = 500000;
             		loop {
                 		sm_chan2.send(1);
                			let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
@@ -140,11 +142,12 @@ fn main() {
                 		if cache.contains_key_equiv(&tf.filepath.to_str()) &&
                            		*cacheTimes.get_copy(&tf.filepath.to_str()) as u64 > modifiedTime 
 				{	
-					println(fmt!("begin serving file [%?]", tf.filepath));
+					println(fmt!("begin serving cached file [%?]", tf.filepath));
                         		// A web server should always reply a HTTP header for any legal HTTP request.
                         		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
                         		let data = cache.get_copy(&tf.filepath.to_str());
                         		tf.stream.write(data);
+					fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
                         		println(fmt!("finish file [%?]", tf.filepath));
                 		}
                 		else {
@@ -159,8 +162,46 @@ fn main() {
                           				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
                                 			tf.stream.write(file_data);
                                 			println(fmt!("finish file [%?]", tf.filepath));
-                                			cache.insert(tf.filepath.to_str(), file_data);
-                                			cacheTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+                                			let file_size = get_fileSize(tf.filepath);
+							if file_size < maxCacheFileSize {
+								cache.insert(tf.filepath.to_str(), file_data);
+								cacheTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+								fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+								if cache.len() > maxCacheSize {
+									let clone = fileAccessTimes.clone();
+									let mut iterator = clone.iter();
+						
+									let mut firstAccessTime: i64;
+									let mut firstAccessKey: &~str;
+									let mut option = iterator.next();
+									match option {
+										Some(s) => {
+											let (key, value) = s;
+											firstAccessTime = **value;
+											firstAccessKey = key;
+										},
+										None => {fail!("hash map iteration failed");}
+									}
+									let mut i = 0;
+									while i < cache.len() - 1 {
+										option = iterator.next();
+										match option {
+											Some(s) => {
+												let (key, value) = s;
+												if **value < firstAccessTime {
+													firstAccessTime = **value;
+													firstAccessKey = key;
+												}
+											},
+											None => {fail!("hash map iteration failed");}
+										}
+										i += 1;
+									}
+									cache.remove(firstAccessKey);
+									cacheTimes.remove(firstAccessKey);
+									fileAccessTimes.remove(firstAccessKey);
+								}
+							}
                              			}
                              			Err(err) => 
 						{	println(err);
