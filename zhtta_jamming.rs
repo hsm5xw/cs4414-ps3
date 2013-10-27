@@ -50,7 +50,10 @@ impl std::cmp::Ord for sched_msg
 	fn ge(&self, other: &sched_msg) -> bool { (*self).priority >= (*other).priority }
 	fn gt(&self, other: &sched_msg) -> bool { (*self).priority > (*other).priority } 
 }
-
+struct cache_file {
+	filedata: ~[u8],
+	cacheTime: ~i64
+}
 
 // determine if the request is from a Charlottesville client
 
@@ -120,9 +123,8 @@ fn main() {
 
         	// a task for sending responses.
         	do spawn {
-         		let mut cache: HashMap<~str, ~[u8]> = std::hashmap::HashMap::new();
-         		let mut cacheTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
 			let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
+			let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
 	   		let maxCacheSize = 2;
 	    		let maxCacheFileSize = 500000;
             		loop {
@@ -134,20 +136,22 @@ fn main() {
                         		Some(s) => {s.modified}
                         		None 	=> {-1} 
 				};
-
-                		if cache.contains_key_equiv(&tf.filepath.to_str()) &&
-                           		*cacheTimes.get_copy(&tf.filepath.to_str()) as u64 > modifiedTime 
-				{	
-					println(fmt!("begin serving cached file [%?]", tf.filepath));
-                        		// A web server should always reply a HTTP header for any legal HTTP request.
-                        		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
-                        		let data = cache.get_copy(&tf.filepath.to_str());
-					let new_file_data = check_SSI(tf.filepath.to_str(),data.clone());  //#
-                        		tf.stream.write(new_file_data);
-					fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
-                        		println(fmt!("finish file [%?]", tf.filepath));
+				let mut fileCached: bool = false;
+                		if cache.contains_key_equiv(&tf.filepath.to_str()) {	
+					let cachedFile = cache.get(&tf.filepath.to_str());
+					if *cachedFile.cacheTime as u64 > modifiedTime {
+						println(fmt!("begin serving cached file [%?]", tf.filepath));
+		                		// A web server should always reply a HTTP header for any legal HTTP request.
+		                		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
+		                		let data = cachedFile.filedata.clone();
+						let new_file_data = check_SSI(tf.filepath.to_str(),data.clone());  //#
+		                		tf.stream.write(new_file_data);
+						fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+		                		println(fmt!("finish file [%?]", tf.filepath));
+						fileCached = true;
+					}
                 		}
-                		else {
+                		if !fileCached {
                  			let file = io::read_whole_file(tf.filepath);
 
             	 			match file { // killed if file size is larger than memory size.
@@ -162,9 +166,9 @@ fn main() {
                                 			println(fmt!("finish file [%?]", tf.filepath));
                                 			let file_size = get_fileSize(tf.filepath);
 							if file_size < maxCacheFileSize {
-								cache.insert(tf.filepath.to_str(), file_data);
-								cacheTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+								let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
 								fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+								cache.insert(tf.filepath.to_str(), cachedFile);
 								if cache.len() > maxCacheSize {
 									let clone = fileAccessTimes.clone();
 									let mut iterator = clone.iter();
@@ -196,7 +200,6 @@ fn main() {
 										i += 1;
 									}
 									cache.remove(firstAccessKey);
-									cacheTimes.remove(firstAccessKey);
 									fileAccessTimes.remove(firstAccessKey);
 								}
 							}
