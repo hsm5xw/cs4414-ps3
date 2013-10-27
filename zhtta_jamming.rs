@@ -100,13 +100,6 @@ fn main() {
  
     let visitor_count: uint = 0; // @@@@@@@
 
-/*
-    let req_vec: ~[sched_msg] = ~[];
-    let shared_req_vec = arc::RWArc::new(req_vec);
-    let add_vec = shared_req_vec.clone();
-    let take_vec = shared_req_vec.clone();
-*/
-
     /* replace data structure to priority queue (this is not the only region changed though) */
 
     let req_pq: PriorityQueue<sched_msg> = PriorityQueue::new();
@@ -120,7 +113,7 @@ fn main() {
     
 
     // dequeue file requests, and send responses.
-    // FIFO
+    // Shortest-Processing-Time-First
     do spawn {
         	let (sm_port, sm_chan) = stream();
         	let (sm_port2, sm_chan2) = stream();
@@ -147,7 +140,7 @@ fn main() {
 				{	
 					println(fmt!("begin serving cached file [%?]", tf.filepath));
                         		// A web server should always reply a HTTP header for any legal HTTP request.
-                        		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
+                        		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
                         		let data = cache.get_copy(&tf.filepath.to_str());
 					let new_file_data = check_SSI(tf.filepath.to_str(),data.clone());  //#
                         		tf.stream.write(new_file_data);
@@ -163,7 +156,7 @@ fn main() {
 						{
                           				println(fmt!("begin serving file [%?]", tf.filepath));
                           				// A web server should always reply a HTTP header for any legal HTTP request.
-                          				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n".as_bytes());
+                          				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
 							let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
                                 			tf.stream.write(new_file_data);
                                 			println(fmt!("finish file [%?]", tf.filepath));
@@ -221,11 +214,9 @@ fn main() {
             port.recv(); // wait for arrving notification
             do take_pq.write |priority_Q| {
                 if ((*priority_Q).len() > 0) {
-                    // LIFO didn't make sense in service scheduling, so we modify it as FIFO by using shift_opt() rather than pop().
-                    
-		    //let tf_opt: Option<sched_msg> = (*priority_Q).pop();
+                   
                     let tf = (*priority_Q).pop();
-                    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));    // ^^^^^^^^^^^^^^^^^^^ probably need to change it later
+                    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));    
                     sm_chan.send(tf); // send the request to send-response-task to serve.
                 }
             }
@@ -355,7 +346,10 @@ fn main() {
             println!("connection terminates\n")
         }
     }
-}
+
+} // main function
+
+
 
 fn check_SSI(pathstr: &str, file_data:  ~[u8]) -> ~[u8] {
 	//let pathstr = file_path.to_str();
