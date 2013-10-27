@@ -125,7 +125,7 @@ fn main() {
         	do spawn {
 			let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
 			let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
-	   		let maxCacheSize = 2;
+	   		let maxCacheSize = 20;
 	    		let maxCacheFileSize = 500000;
             		loop {
                 		sm_chan2.send(1);
@@ -292,8 +292,11 @@ fn main() {
             if req_group.len() > 2 {
                 let path = req_group[1];
                 println(fmt!("Request for path: \n%?", path));
-                
-                let file_path = ~os::getcwd().push(path.replace("/../", ""));
+		let mut newPath: ~str = path.replace("/../", "");
+                for i in range(0, path.len() / 4) {
+			newPath = newPath.replace("/../", "");
+		}
+                let file_path = ~os::getcwd().push(newPath);
 
                 if !os::path_exists(file_path) || os::path_is_dir(file_path)
                 {
