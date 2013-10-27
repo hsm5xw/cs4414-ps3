@@ -126,7 +126,8 @@ fn main() {
 			let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
 			let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
 	   		let maxCacheSize = 20;
-	    		let maxCacheFileSize = 500000;
+	    		let maxCacheFileSize = 1000000;
+			let maxSSIFileSize = 1000000;
             		loop {
                 		sm_chan2.send(1);
                			let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
@@ -137,15 +138,20 @@ fn main() {
                         		None 	=> {-1} 
 				};
 				let mut fileCached: bool = false;
-                		if cache.contains_key_equiv(&tf.filepath.to_str()) {	
+                		if cache.contains_key_equiv(&tf.filepath.to_str()) {
 					let cachedFile = cache.get(&tf.filepath.to_str());
 					if *cachedFile.cacheTime as u64 > modifiedTime {
 						println(fmt!("begin serving cached file [%?]", tf.filepath));
 		                		// A web server should always reply a HTTP header for any legal HTTP request.
 		                		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
-		                		let data = cachedFile.filedata.clone();
-						let new_file_data = check_SSI(tf.filepath.to_str(),data.clone());  //#
-		                		tf.stream.write(new_file_data);
+						let file_size = get_fileSize(tf.filepath);
+						if file_size < maxSSIFileSize {
+							let new_file_data = check_SSI(tf.filepath.to_str(),cachedFile.filedata.clone());  //#
+		                			tf.stream.write(new_file_data);
+						}
+						else {
+							tf.stream.write(cachedFile.filedata);
+						}
 						fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
 		                		println(fmt!("finish file [%?]", tf.filepath));
 						fileCached = true;
@@ -160,12 +166,18 @@ fn main() {
 						{
                           				println(fmt!("begin serving file [%?]", tf.filepath));
                           				// A web server should always reply a HTTP header for any legal HTTP request.
-                          				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
-							let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
-                                			tf.stream.write(new_file_data);
+                          				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());	
+							let file_size = get_fileSize(tf.filepath);
+							if file_size < maxSSIFileSize {
+								let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
+                                				tf.stream.write(new_file_data);
+							}
+							else {
+								tf.stream.write(file_data);
+							}
                                 			println(fmt!("finish file [%?]", tf.filepath));
-                                			let file_size = get_fileSize(tf.filepath);
-							if file_size < maxCacheFileSize {
+                                			
+							if file_size < maxCacheFileSize && maxCacheSize > 0 {
 								let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
 								fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
 								cache.insert(tf.filepath.to_str(), cachedFile);
@@ -205,7 +217,9 @@ fn main() {
 							}
                              			}
                              			Err(err) => 
-						{	println(err);
+						{	
+							println("read error");
+							println(err);
 						}
                     			} 
                 		} // else
