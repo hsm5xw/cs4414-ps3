@@ -127,7 +127,6 @@ fn main() {
 			let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
 	   		let maxCacheSize = 20;
 	    		let maxCacheFileSize = 1000000;
-			let maxSSIFileSize = 1000000;
             		loop {
                 		sm_chan2.send(1);
                			let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
@@ -144,8 +143,7 @@ fn main() {
 						println(fmt!("begin serving cached file [%?]", tf.filepath));
 		                		// A web server should always reply a HTTP header for any legal HTTP request.
 		                		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
-						let file_size = get_fileSize(tf.filepath);
-						if file_size < maxSSIFileSize {
+						if tf.filepath.to_str().contains(".shtml") {
 							let new_file_data = check_SSI(tf.filepath.to_str(),cachedFile.filedata.clone());  //#
 		                			tf.stream.write(new_file_data);
 						}
@@ -168,7 +166,7 @@ fn main() {
                           				// A web server should always reply a HTTP header for any legal HTTP request.
                           				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());	
 							let file_size = get_fileSize(tf.filepath);
-							if file_size < maxSSIFileSize {
+							if  tf.filepath.to_str().contains(".shtml") {
 								let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
                                 				tf.stream.write(new_file_data);
 							}
