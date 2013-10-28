@@ -42,6 +42,16 @@ struct sched_msg {
     filepath: ~std::path::PosixPath,
     priority: int // @@@@@@@@@@@@@@@
 }
+impl std::cmp::Eq for sched_msg
+{
+        fn eq(&self, other: &sched_msg) -> bool { (&(self).filepath).eq(&(other).filepath) }
+}
+impl std::clone::Clone for sched_msg
+{
+        fn clone(&self) -> sched_msg {
+		sched_msg{stream: None, filepath: self.filepath.clone(), priority: self.priority}
+	}
+}
 
 impl std::cmp::Ord for sched_msg
 {
@@ -108,19 +118,27 @@ fn main() {
     // dequeue file requests, and send responses.
     // Shortest-Processing-Time-First
     do spawn {
-                let (sm_port, sm_chan) = stream();
-                let (sm_port2, sm_chan2) = stream();
+               // let (sm_port, sm_chan) = stream();
+               // let (sm_port2, sm_chan2) = stream();
 
                 // a task for sending responses.
-                do spawn {
+               // do spawn {
                         let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
                         let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
 			let gash_whitelist: ~[~str] = ~[~"date"];
-                         let maxCacheSize = 20;
-                         let maxCacheFileSize = 1000000;
+                         let maxCacheSize = 5;
+                         let maxCacheFileSize = 100000000;
                             loop {
-                                sm_chan2.send(1);
-                                       let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
+                                 port.recv(); // wait for arrving notification
+				  let mut tf: sched_msg = sched_msg{stream: None, filepath: ~os::getcwd().push(""), priority: 0};
+				  do take_pq.write |priority_Q| {
+					if ((*priority_Q).len() > 0) {
+					   
+			  		    tf = (*priority_Q).pop();
+					    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));
+					  //  sm_chan.send(tf); // send the request to send-response-task to serve.
+					}
+				    }
                 
                                 let modifiedTime = match file::stat(tf.filepath)
                                 {
@@ -133,16 +151,16 @@ fn main() {
                                         if *cachedFile.cacheTime as u64 > modifiedTime {
                                                 println(fmt!("begin serving cached file [%?]", tf.filepath));
                                  // A web server should always reply a HTTP header for any legal HTTP request.
-                                 tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
+                               			tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
                                                 if tf.filepath.to_str().contains(".shtml") {
                                                         let new_file_data = check_SSI(gash_whitelist ,cachedFile.filedata.clone()); //#
-                                         tf.stream.write(new_file_data);
+                                      			tf.stream.write(new_file_data);
                                                 }
                                                 else {
                                                         tf.stream.write(cachedFile.filedata);
                                                 }
-                                                fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
-                                 println(fmt!("finish file [%?]", tf.filepath));
+                                                fileAccessTimes.insert(tf.filepath.to_str(), ~(time::get_time().sec * 1000 + time::get_time().nsec as i64/1000));
+                               			println(fmt!("finish file [%?]", tf.filepath));
                                                 fileCached = true;
                                         }
                                 }
@@ -166,46 +184,84 @@ fn main() {
                                                         }
                                                         println(fmt!("finish file [%?]", tf.filepath));
                                                         
-                                                        if file_size < maxCacheFileSize && maxCacheSize > 0 {
-                                                                let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
-                                                                fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
-                                                                cache.insert(tf.filepath.to_str(), cachedFile);
-                                                                if cache.len() > maxCacheSize {
-                                                                        let clone = fileAccessTimes.clone();
-                                                                        let mut iterator = clone.iter();
-                                                
-                                                                        let mut firstAccessTime: i64;
-                                                                        let mut firstAccessKey: &~str;
-                                                                        let mut option = iterator.next();
+                                                        let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
+							let mut add: bool = false;
+							let mut qCount: HashMap<~str, int> = std::hashmap::HashMap::new();
+                                                        do take_pq.write |priority_Q| {
+								let pqClone = priority_Q.clone().to_vec();
+		                                                if file_size < maxCacheFileSize && maxCacheSize > 0 || 
+									pqClone.contains(&tf) {
+		                                                        add = true;
+								}
+								let mut i = 0;
+								while i < pqClone.len() {
+									if qCount.contains_key_equiv(&pqClone[i].filepath.to_str()) {
+										let temp = qCount.get_copy(&pqClone[i].filepath.to_str());
+										qCount.insert(pqClone[i].filepath.to_str(), temp + 1);
+									}
+									else {
+										qCount.insert(pqClone[i].filepath.to_str(), 1);
+									}
+									i += 1;
+								}
+							}
+							if add {
+								fileAccessTimes.insert(tf.filepath.to_str(), ~(time::get_time().sec * 1000 + time::get_time().nsec as i64/1000));
+		                                                cache.insert(tf.filepath.to_str(), cachedFile);
+							}
+                                                        if cache.len() > maxCacheSize {
+                                                                let clone = fileAccessTimes.clone();
+                                                                let mut iterator = clone.iter();
+                                        
+                                                                let mut lowestPriority: int;
+                                                                let mut lowPriorityKey: &~str;
+                                                                let mut option = iterator.next();
+								let currentTime = time::get_time().sec * 1000 + time::get_time().nsec as i64/1000;
+                                                                match option {
+                                                                        Some(s) => {
+                                                                                let (key, value) = s;
+										let fileSize = get_fileSize(&path::Path(*key));
+										if currentTime - **value > 0 {
+                                                                                	lowestPriority = fileSize/((currentTime - **value) as int);
+											if qCount.contains_key_equiv(key) {
+												lowestPriority += qCount.get_copy(key) * fileSize * 3;
+											}
+										}
+										else {
+											lowestPriority = 9000000000000000000;
+										}
+                                                                                lowPriorityKey = key;
+                                                                        },
+                                                                        None => {fail!("hash map iteration failed");}
+                                                                }
+                                                                let mut i = 0;
+                                                                while i < cache.len() - 1 {
+                                                                        option = iterator.next();
                                                                         match option {
                                                                                 Some(s) => {
                                                                                         let (key, value) = s;
-                                                                                        firstAccessTime = **value;
-                                                                                        firstAccessKey = key;
+											let fileSize = get_fileSize(&path::Path(*key));
+											let mut priority = 9000000000000000000;
+											if currentTime - **value > 0 {
+                                                                                		priority = fileSize/((currentTime - **value) as int);
+												if qCount.contains_key_equiv(key) {
+													priority += qCount.get_copy(key) * fileSize * 3;
+												}
+											}
+                                                                                        if priority < lowestPriority {
+                                                                                                lowestPriority = priority;
+                                                                                                lowPriorityKey = key;
+                                                                                        }
                                                                                 },
                                                                                 None => {fail!("hash map iteration failed");}
                                                                         }
-                                                                        let mut i = 0;
-                                                                        while i < cache.len() - 1 {
-                                                                                option = iterator.next();
-                                                                                match option {
-                                                                                        Some(s) => {
-                                                                                                let (key, value) = s;
-                                                                                                if **value < firstAccessTime {
-                                                                                                        firstAccessTime = **value;
-                                                                                                        firstAccessKey = key;
-                                                                                                }
-                                                                                        },
-                                                                                        None => {fail!("hash map iteration failed");}
-                                                                                }
-                                                                                i += 1;
-                                                                        }
-                                                                        cache.remove(firstAccessKey);
-                                                                        fileAccessTimes.remove(firstAccessKey);
+                                                                        i += 1;
                                                                 }
+                                                                cache.remove(lowPriorityKey);
+                                                                fileAccessTimes.remove(lowPriorityKey);
                                                         }
-                                                     }
-                                                     Err(err) =>
+                                        	}
+                                                Err(err) =>
                                                 {        
                                                         println("read error");
                                                         println(err);
@@ -213,9 +269,9 @@ fn main() {
                                             }
                                 } // else
                            } // loop
-                } // spawn (inner)
+               // } // spawn (inner)
         
-        loop {
+       /* loop {
          sm_port2.recv();
             port.recv(); // wait for arrving notification
             do take_pq.write |priority_Q| {
@@ -226,7 +282,7 @@ fn main() {
                     sm_chan.send(tf); // send the request to send-response-task to serve.
                 }
             }
-        }
+        }*/
     } // spawn (outer)
 
 
