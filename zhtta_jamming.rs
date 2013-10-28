@@ -221,14 +221,9 @@ fn main() {
                                                                         Some(s) => {
                                                                                 let (key, value) = s;
 										let fileSize = get_fileSize(&path::Path(*key));
-										if currentTime - **value > 0 {
-                                                                                	lowestPriority = fileSize/((currentTime - **value) as int);
-											if qCount.contains_key_equiv(key) {
-												lowestPriority += qCount.get_copy(key) * fileSize * 3;
-											}
-										}
-										else {
-											lowestPriority = 9000000000000000000;
+                                                                                lowestPriority = fileSize/((currentTime - **value + 1) as int);
+										if qCount.contains_key_equiv(key) {
+											lowestPriority += qCount.get_copy(key) * fileSize * 5;
 										}
                                                                                 lowPriorityKey = key;
                                                                         },
@@ -241,12 +236,9 @@ fn main() {
                                                                                 Some(s) => {
                                                                                         let (key, value) = s;
 											let fileSize = get_fileSize(&path::Path(*key));
-											let mut priority = 9000000000000000000;
-											if currentTime - **value > 0 {
-                                                                                		priority = fileSize/((currentTime - **value) as int);
-												if qCount.contains_key_equiv(key) {
-													priority += qCount.get_copy(key) * fileSize * 3;
-												}
+											let mut priority = fileSize/((currentTime - **value + 1) as int);
+											if qCount.contains_key_equiv(key) {
+												priority += qCount.get_copy(key) * fileSize * 5;
 											}
                                                                                         if priority < lowestPriority {
                                                                                                 lowestPriority = priority;
