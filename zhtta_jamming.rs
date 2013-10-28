@@ -115,6 +115,7 @@ fn main() {
                 do spawn {
                         let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
                         let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
+			let gash_whitelist: ~[~str] = ~[~"date"];
                          let maxCacheSize = 20;
                          let maxCacheFileSize = 1000000;
                             loop {
@@ -134,7 +135,7 @@ fn main() {
                                  // A web server should always reply a HTTP header for any legal HTTP request.
                                  tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
                                                 if tf.filepath.to_str().contains(".shtml") {
-                                                        let new_file_data = check_SSI(tf.filepath.to_str(),cachedFile.filedata.clone()); //#
+                                                        let new_file_data = check_SSI(gash_whitelist ,cachedFile.filedata.clone()); //#
                                          tf.stream.write(new_file_data);
                                                 }
                                                 else {
@@ -157,7 +158,7 @@ fn main() {
                                                           tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());        
                                                         let file_size = get_fileSize(tf.filepath);
                                                         if tf.filepath.to_str().contains(".shtml") {
-                                                                let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
+                                                                let new_file_data = check_SSI(gash_whitelist,file_data.clone()); //#
                                                                 tf.stream.write(new_file_data);
                                                         }
                                                         else {
@@ -359,27 +360,32 @@ fn main() {
 
 
 
-fn check_SSI(pathstr: &str, file_data: ~[u8]) -> ~[u8] {
-        //let pathstr = file_path.to_str();
-        if pathstr.contains(".shtml") {
-                let mut data = std::str::from_utf8_owned(file_data);
-                if data.contains("<!--#exec cmd=\"") {
-                        let startbyte = data.find_str("<!--#exec cmd=\"").unwrap();
-                        let endbyte = data.find_str("\" -->").unwrap();
-                        let command = (data.slice(startbyte+15, endbyte).to_owned());
-                        println(command);
-                        println("hello");
-                        let frontdata = data.slice_to(startbyte).to_owned();
-                        let backdata = data.slice_from(endbyte+5).to_owned();
-                        let result = "<p>" + gash_handle(command) + "</p>";
-                        data = frontdata +result+ backdata;
-                }
-                println(data);
-                let write_data = data.as_bytes().to_owned();
-                return write_data;
-        } else {
-                return file_data;
-        }
+fn check_SSI(gash_whitelist: &[~str], file_data: ~[u8]) -> ~[u8] {
+
+	let mut data = std::str::from_utf8_owned(file_data);
+	if data.contains("<!--#exec cmd=\"") {
+		let startbyte = data.find_str("<!--#exec cmd=\"").unwrap();
+		let endbyte = data.find_str("\" -->").unwrap();
+		let command = (data.slice(startbyte+15, endbyte).to_owned());
+		let frontdata = data.slice_to(startbyte).to_owned();
+		let backdata = data.slice_from(endbyte+5).to_owned();
+		let mut contains: bool = false;
+		for i in range(0, gash_whitelist.len()) {
+			if gash_whitelist[i] == command {
+				contains = true;	
+			}
+		}
+		let mut result = ~"";
+		if contains == true {
+			result = ~"<p>" + gash_handle(command) + "</p>";
+		} else {
+			result = ~"Gash command not permitted";
+		}
+		data = frontdata +result+ backdata;
+	}
+	let write_data = data.as_bytes().to_owned();
+	return write_data;
+
 }
 
 fn gash_handle(command: ~str) -> ~str {
