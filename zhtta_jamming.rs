@@ -40,19 +40,19 @@ static IP: &'static str = "127.0.0.1";
 struct sched_msg {
     stream: Option<std::rt::io::net::tcp::TcpStream>,
     filepath: ~std::path::PosixPath,
-    priority: int  // @@@@@@@@@@@@@@@
+    priority: int // @@@@@@@@@@@@@@@
 }
 
 impl std::cmp::Ord for sched_msg
 {
-	fn lt(&self, other: &sched_msg) -> bool { (*self).priority < (*other).priority }
-	fn le(&self, other: &sched_msg) -> bool { (*self).priority <= (*other).priority }
-	fn ge(&self, other: &sched_msg) -> bool { (*self).priority >= (*other).priority }
-	fn gt(&self, other: &sched_msg) -> bool { (*self).priority > (*other).priority } 
+        fn lt(&self, other: &sched_msg) -> bool { (*self).priority < (*other).priority }
+        fn le(&self, other: &sched_msg) -> bool { (*self).priority <= (*other).priority }
+        fn ge(&self, other: &sched_msg) -> bool { (*self).priority >= (*other).priority }
+        fn gt(&self, other: &sched_msg) -> bool { (*self).priority > (*other).priority }
 }
 struct cache_file {
-	filedata: ~[u8],
-	cacheTime: ~i64
+        filedata: ~[u8],
+        cacheTime: ~i64
 }
 
 // determine if the request is from a Charlottesville client
@@ -80,22 +80,12 @@ fn is_Wahoo_Client(peer_addr: ~str) ->bool
 
 fn get_fileSize(file_path: &Path) -> int
 {
-        let mut filestream = std::rt::io::file::open(file_path, Open, Read);
-        let mut size:int = 0;
-
-        // find the File size
-        match filestream{
-                Some(ref mut reader) =>
-                {                                                                        
-                        reader.seek(0,SeekEnd);
-                        size = reader.tell() as int;
-                        reader.seek(0, SeekSet); // rewind the file back
-
-                        println(fmt!("\nfile size: %? bytes \n", size ));
-                },
-                None => { fail!("\nCannot read the storage file \n");},
-        }
-        return size;        
+        let fileSize = match file::stat(file_path)
+        {
+        	Some(s) => {s.size}
+                None         => {-1}
+        };
+	return fileSize as int;
 }
 
 
@@ -118,120 +108,120 @@ fn main() {
     // dequeue file requests, and send responses.
     // Shortest-Processing-Time-First
     do spawn {
-        	let (sm_port, sm_chan) = stream();
-        	let (sm_port2, sm_chan2) = stream();
+                let (sm_port, sm_chan) = stream();
+                let (sm_port2, sm_chan2) = stream();
 
-        	// a task for sending responses.
-        	do spawn {
-			let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
-			let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
-	   		let maxCacheSize = 20;
-	    		let maxCacheFileSize = 1000000;
-            		loop {
-                		sm_chan2.send(1);
-               			let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
+                // a task for sending responses.
+                do spawn {
+                        let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
+                        let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
+                         let maxCacheSize = 20;
+                         let maxCacheFileSize = 1000000;
+                            loop {
+                                sm_chan2.send(1);
+                                       let mut tf: sched_msg = sm_port.recv(); // wait for the dequeued request to handle
                 
-                		let modifiedTime = match file::stat(tf.filepath)
-				{
-                        		Some(s) => {s.modified}
-                        		None 	=> {-1} 
-				};
-				let mut fileCached: bool = false;
-                		if cache.contains_key_equiv(&tf.filepath.to_str()) {
-					let cachedFile = cache.get(&tf.filepath.to_str());
-					if *cachedFile.cacheTime as u64 > modifiedTime {
-						println(fmt!("begin serving cached file [%?]", tf.filepath));
-		                		// A web server should always reply a HTTP header for any legal HTTP request.
-		                		tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
-						if tf.filepath.to_str().contains(".shtml") {
-							let new_file_data = check_SSI(tf.filepath.to_str(),cachedFile.filedata.clone());  //#
-		                			tf.stream.write(new_file_data);
-						}
-						else {
-							tf.stream.write(cachedFile.filedata);
-						}
-						fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
-		                		println(fmt!("finish file [%?]", tf.filepath));
-						fileCached = true;
-					}
-                		}
-                		if !fileCached {
-                 			let file = io::read_whole_file(tf.filepath);
+                                let modifiedTime = match file::stat(tf.filepath)
+                                {
+                                        Some(s) => {s.modified}
+                                        None         => {-1}
+                                };
+                                let mut fileCached: bool = false;
+                                if cache.contains_key_equiv(&tf.filepath.to_str()) {
+                                        let cachedFile = cache.get(&tf.filepath.to_str());
+                                        if *cachedFile.cacheTime as u64 > modifiedTime {
+                                                println(fmt!("begin serving cached file [%?]", tf.filepath));
+                                 // A web server should always reply a HTTP header for any legal HTTP request.
+                                 tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
+                                                if tf.filepath.to_str().contains(".shtml") {
+                                                        let new_file_data = check_SSI(tf.filepath.to_str(),cachedFile.filedata.clone()); //#
+                                         tf.stream.write(new_file_data);
+                                                }
+                                                else {
+                                                        tf.stream.write(cachedFile.filedata);
+                                                }
+                                                fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+                                 println(fmt!("finish file [%?]", tf.filepath));
+                                                fileCached = true;
+                                        }
+                                }
+                                if !fileCached {
+                                         let file = io::read_whole_file(tf.filepath);
 
-            	 			match file { // killed if file size is larger than memory size.
+                                             match file { // killed if file size is larger than memory size.
 
-                         			Ok(file_data) => 
-						{
-                          				println(fmt!("begin serving file [%?]", tf.filepath));
-                          				// A web server should always reply a HTTP header for any legal HTTP request.
-                          				tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());	
-							let file_size = get_fileSize(tf.filepath);
-							if  tf.filepath.to_str().contains(".shtml") {
-								let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
-                                				tf.stream.write(new_file_data);
-							}
-							else {
-								tf.stream.write(file_data);
-							}
-                                			println(fmt!("finish file [%?]", tf.filepath));
-                                			
-							if file_size < maxCacheFileSize && maxCacheSize > 0 {
-								let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
-								fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
-								cache.insert(tf.filepath.to_str(), cachedFile);
-								if cache.len() > maxCacheSize {
-									let clone = fileAccessTimes.clone();
-									let mut iterator = clone.iter();
-						
-									let mut firstAccessTime: i64;
-									let mut firstAccessKey: &~str;
-									let mut option = iterator.next();
-									match option {
-										Some(s) => {
-											let (key, value) = s;
-											firstAccessTime = **value;
-											firstAccessKey = key;
-										},
-										None => {fail!("hash map iteration failed");}
-									}
-									let mut i = 0;
-									while i < cache.len() - 1 {
-										option = iterator.next();
-										match option {
-											Some(s) => {
-												let (key, value) = s;
-												if **value < firstAccessTime {
-													firstAccessTime = **value;
-													firstAccessKey = key;
-												}
-											},
-											None => {fail!("hash map iteration failed");}
-										}
-										i += 1;
-									}
-									cache.remove(firstAccessKey);
-									fileAccessTimes.remove(firstAccessKey);
-								}
-							}
-                             			}
-                             			Err(err) => 
-						{	
-							println("read error");
-							println(err);
-						}
-                    			} 
-                		} // else
-           		} // loop
-        	} // spawn (inner)
+                                                 Ok(file_data) =>
+                                                {
+                                                          println(fmt!("begin serving file [%?]", tf.filepath));
+                                                          // A web server should always reply a HTTP header for any legal HTTP request.
+                                                          tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());        
+                                                        let file_size = get_fileSize(tf.filepath);
+                                                        if tf.filepath.to_str().contains(".shtml") {
+                                                                let new_file_data = check_SSI(tf.filepath.to_str(),file_data.clone()); //#
+                                                                tf.stream.write(new_file_data);
+                                                        }
+                                                        else {
+                                                                tf.stream.write(file_data);
+                                                        }
+                                                        println(fmt!("finish file [%?]", tf.filepath));
+                                                        
+                                                        if file_size < maxCacheFileSize && maxCacheSize > 0 {
+                                                                let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
+                                                                fileAccessTimes.insert(tf.filepath.to_str(), ~time::get_time().sec);
+                                                                cache.insert(tf.filepath.to_str(), cachedFile);
+                                                                if cache.len() > maxCacheSize {
+                                                                        let clone = fileAccessTimes.clone();
+                                                                        let mut iterator = clone.iter();
+                                                
+                                                                        let mut firstAccessTime: i64;
+                                                                        let mut firstAccessKey: &~str;
+                                                                        let mut option = iterator.next();
+                                                                        match option {
+                                                                                Some(s) => {
+                                                                                        let (key, value) = s;
+                                                                                        firstAccessTime = **value;
+                                                                                        firstAccessKey = key;
+                                                                                },
+                                                                                None => {fail!("hash map iteration failed");}
+                                                                        }
+                                                                        let mut i = 0;
+                                                                        while i < cache.len() - 1 {
+                                                                                option = iterator.next();
+                                                                                match option {
+                                                                                        Some(s) => {
+                                                                                                let (key, value) = s;
+                                                                                                if **value < firstAccessTime {
+                                                                                                        firstAccessTime = **value;
+                                                                                                        firstAccessKey = key;
+                                                                                                }
+                                                                                        },
+                                                                                        None => {fail!("hash map iteration failed");}
+                                                                                }
+                                                                                i += 1;
+                                                                        }
+                                                                        cache.remove(firstAccessKey);
+                                                                        fileAccessTimes.remove(firstAccessKey);
+                                                                }
+                                                        }
+                                                     }
+                                                     Err(err) =>
+                                                {        
+                                                        println("read error");
+                                                        println(err);
+                                                }
+                                            }
+                                } // else
+                           } // loop
+                } // spawn (inner)
         
         loop {
-	    sm_port2.recv();
+         sm_port2.recv();
             port.recv(); // wait for arrving notification
             do take_pq.write |priority_Q| {
                 if ((*priority_Q).len() > 0) {
                    
                     let tf = (*priority_Q).pop();
-                    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));    
+                    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));
                     sm_chan.send(tf); // send the request to send-response-task to serve.
                 }
             }
@@ -240,8 +230,8 @@ fn main() {
 
 
     let ip = match FromStr::from_str(IP) { Some(ip) => ip,
-                                           None     => {println(fmt!("Error: Invalid IP address <%s>", IP));
-                                                    	return;}
+                                           None => {println(fmt!("Error: Invalid IP address <%s>", IP));
+                                                            return;}
                                          };
     
 
@@ -256,21 +246,21 @@ fn main() {
 
     for stream in acceptor.incoming() {
         let mut stream = stream; // @@@@@@
-        let mut peer_addr: ~str = ~"";        
+        let mut peer_addr: ~str = ~"";
 
         match stream {
                 Some(ref mut s) =>
                 {
-                        match s.peer_name() {        
+                        match s.peer_name() {
                                 Some(pn) =>
-                                {   peer_addr = pn.to_str();
-                                    println( fmt!("\nPeer address: %s", peer_addr ));                                        
-                                },                                        
-                                None     => ()
+                                { peer_addr = pn.to_str();
+                                    println( fmt!("\nPeer address: %s", peer_addr ));
+                                },
+                                None => ()
                         }
                 }
                 None => ()
-        }                         
+        }
 
         let isWahoo: bool = is_Wahoo_Client(peer_addr);
         println( fmt!("is wahoo? : %?\n", isWahoo) );
@@ -289,10 +279,10 @@ fn main() {
        
          let shared_count_copy = count_port.recv(); // @@@@@@
 
-         /* Get Write Access */                 
+         /* Get Write Access */
          do shared_count_copy.write |count|{
                         *count = *count + 1;
-                        println( fmt!("count: %? \n", *count as int) );                        
+                        println( fmt!("count: %? \n", *count as int) );
          }
                                    
             let mut stream = stream.take();
@@ -304,34 +294,34 @@ fn main() {
             if req_group.len() > 2 {
                 let path = req_group[1];
                 println(fmt!("Request for path: \n%?", path));
-		let mut newPath: ~str = path.replace("/../", "");
+                let mut newPath: ~str = path.replace("/../", "");
                 for i in range(0, path.len() / 4) {
-			newPath = newPath.replace("/../", "");
-		}
+                        newPath = newPath.replace("/../", "");
+                }
                 let file_path = ~os::getcwd().push(newPath);
 
                 if !os::path_exists(file_path) || os::path_is_dir(file_path)
                 {
                     println(fmt!("Request received:\n%s", request_str));
 
-                 	/* Get Read Access */
-                	 do shared_count_copy.read |count|
-                 	{                        
-                           	let response: ~str = fmt!(
-                        	"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
-                        	<doctype !html><html>
-                        	<head><title>Hello, Rust!</title>
-                        	<style> body { background-color: #111; color: #FFEEAA }
-                               	 	h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
-                                	h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
-                        	</style>
-                        	</head>
-                        	<body>
-                                	<h1>Greetings, Krusty!</h1>
-                                	<h2>Visitor count: %u</h2>
-                        	</body></html>\r\n", *count);        
-                        	stream.write(response.as_bytes());        
-                     	 }
+                         /* Get Read Access */
+                         do shared_count_copy.read |count|
+                         {
+                                   let response: ~str = fmt!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
+        <doctype !html><html>
+        <head><title>Hello, Rust!</title>
+        <style> body { background-color: #111; color: #FFEEAA }
+                 h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
+        h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
+        </style>
+        </head>
+        <body>
+        <h1>Greetings, Krusty!</h1>
+        <h2>Visitor count: %u</h2>
+        </body></html>\r\n", *count);
+                                stream.write(response.as_bytes());
+                              }
 
                 }
                 else {
@@ -339,18 +329,18 @@ fn main() {
 
                     let file_size:int = get_fileSize(file_path); // @@@@@@@@@@@
 
-		    // Rust 0.8 only provides a maximum priority queue
-		    let mut adjusted_priority: int = (-1) * (log2( file_size as float) as int); // multiply priority by (-1) to use it as minimum priority queue
+                 // Rust 0.8 only provides a maximum priority queue
+                 let mut adjusted_priority: int = (-1) * (log2( file_size as float) as int); // multiply priority by (-1) to use it as minimum priority queue
 
-		    // Implement 'Wahoo-First' scheduling
-		    if(isWahoo) { adjusted_priority += 3;}
+                 // Implement 'Wahoo-First' scheduling
+                 if(isWahoo) { adjusted_priority += 3;}
 
-                    let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone(), priority: adjusted_priority }; 
+                    let msg: sched_msg = sched_msg{stream: stream, filepath: file_path.clone(), priority: adjusted_priority };
 
                     let (sm_port, sm_chan) = std::comm::stream();
                     sm_chan.send(msg);
                     
-		    // Implement 'Shortest-Processing-Time-First' scheduling
+                 // Implement 'Shortest-Processing-Time-First' scheduling
                     do child_add_pq.write |priority_Q| {
                         let msg = sm_port.recv();
                         (*priority_Q).push(msg); // enqueue new request.
@@ -369,42 +359,42 @@ fn main() {
 
 
 
-fn check_SSI(pathstr: &str, file_data:  ~[u8]) -> ~[u8] {
-	//let pathstr = file_path.to_str();
-	if pathstr.contains(".shtml") {
-		let mut data = std::str::from_utf8_owned(file_data);
-		if data.contains("<!--#exec cmd=\"") {
-			let startbyte = data.find_str("<!--#exec cmd=\"").unwrap();
-			let endbyte = data.find_str("\" -->").unwrap();
-			let command = (data.slice(startbyte+15, endbyte).to_owned());
-			println(command);
-			println("hello");
-			let frontdata = data.slice_to(startbyte).to_owned();
-			let backdata = data.slice_from(endbyte+5).to_owned();
-			let result = "<p>" + gash_handle(command) + "</p>"; 
-			data = frontdata +result+ backdata;
-		}
-		println(data);
-		let write_data = data.as_bytes().to_owned();
-		return write_data;
-	} else {
-		return file_data;
-	}
+fn check_SSI(pathstr: &str, file_data: ~[u8]) -> ~[u8] {
+        //let pathstr = file_path.to_str();
+        if pathstr.contains(".shtml") {
+                let mut data = std::str::from_utf8_owned(file_data);
+                if data.contains("<!--#exec cmd=\"") {
+                        let startbyte = data.find_str("<!--#exec cmd=\"").unwrap();
+                        let endbyte = data.find_str("\" -->").unwrap();
+                        let command = (data.slice(startbyte+15, endbyte).to_owned());
+                        println(command);
+                        println("hello");
+                        let frontdata = data.slice_to(startbyte).to_owned();
+                        let backdata = data.slice_from(endbyte+5).to_owned();
+                        let result = "<p>" + gash_handle(command) + "</p>";
+                        data = frontdata +result+ backdata;
+                }
+                println(data);
+                let write_data = data.as_bytes().to_owned();
+                return write_data;
+        } else {
+                return file_data;
+        }
 }
 
 fn gash_handle(command: ~str) -> ~str {
-	let mut cmd_line = command;
+        let mut cmd_line = command;
         cmd_line = cmd_line.trim().to_owned();
         let mut bg_flag = false;
         if cmd_line.ends_with("&") {
             cmd_line = cmd_line.trim_right_chars(&'&').to_owned();
             bg_flag = true;
-        }  
+        }
         handle_cmdline(cmd_line, bg_flag);
-	let temp_path = &path::Path("temp");
-	let output = io::read_whole_file_str(temp_path).unwrap();
-	os::remove_file(temp_path);
-	return output;
+        let temp_path = &path::Path("temp");
+        let output = io::read_whole_file_str(temp_path).unwrap();
+        os::remove_file(temp_path);
+        return output;
 }
 
 fn get_fd(fpath: &str, mode: &str) -> libc::c_int {
@@ -453,26 +443,26 @@ fn handle_cmd(cmd_line: &str, pipe_in: libc::c_int, pipe_out: libc::c_int, pipe_
             //~"history" => {for i in range(0, history.len()) {println(fmt!("%5u %s", i+1, history[i]));}}
             ~"exit" => {exit(0);}
             _ => {
-			if out_fd != 1 {
-				let mut prog = run::Process::new(program, argv, run::ProcessOptions {
+                        if out_fd != 1 {
+                                let mut prog = run::Process::new(program, argv, run::ProcessOptions {
                                                                                         env: None,
                                                                                         dir: None,
                                                                                         in_fd: Some(in_fd),
                                                                                         out_fd: Some(out_fd),
                                                                                         err_fd: Some(err_fd)
                                                                                     });
-			prog.finish();
-		   	} else {
-				
-				let mut prog = run::Process::new(program, argv, run::ProcessOptions {
+                        prog.finish();
+                         } else {
+                                
+                                let mut prog = run::Process::new(program, argv, run::ProcessOptions {
                                                                                         env: None,
                                                                                         dir: None,
                                                                                         in_fd: Some(in_fd),
                                                                                         out_fd: Some(get_fd("temp","w")),
                                                                                         err_fd: Some(err_fd)
                                                                                     });
-			prog.finish();
-			}
+                        prog.finish();
+                        }
 
                              // close the pipes after process terminates.
                              if in_fd != 0 {os::close(in_fd);}
@@ -523,4 +513,3 @@ fn handle_cmdline(cmd_line:&str, bg_flag:bool)
         }
     }
 }
-
