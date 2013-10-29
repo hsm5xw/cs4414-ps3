@@ -12,6 +12,9 @@
 // Weilin Xu and David Evans
 // Version 0.3
 
+// *** Acknowledgement: The shell program was taken from Public-Reference-Solution/ps2/gash.rs
+
+
 extern mod extra;
 
 use std::rt::io::*;
@@ -123,14 +126,16 @@ fn main() {
 
                 // a task for sending responses.
                // do spawn {
-                        let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
-                        let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
-			let gash_whitelist: ~[~str] = ~[~"date"];
+                         let mut fileAccessTimes: HashMap<~str, ~i64> = std::hashmap::HashMap::new();
+                         let mut cache: HashMap<~str, cache_file> = std::hashmap::HashMap::new();
+			 let gash_whitelist: ~[~str] = ~[~"date"];
                          let maxCacheSize = 5;
                          let maxCacheFileSize = 100000000;
+
                             loop {
                                  port.recv(); // wait for arrving notification
 				  let mut tf: sched_msg = sched_msg{stream: None, filepath: ~os::getcwd().push(""), priority: 0};
+
 				  do take_pq.write |priority_Q| {
 					if ((*priority_Q).len() > 0) {
 					   
@@ -138,7 +143,7 @@ fn main() {
 					    println(fmt!("shift from queue, size: %ud", (*priority_Q).len()));
 					  //  sm_chan.send(tf); // send the request to send-response-task to serve.
 					}
-				    }
+				   }
                 
                                 let modifiedTime = match file::stat(tf.filepath)
                                 {
@@ -146,48 +151,57 @@ fn main() {
                                         None         => {-1}
                                 };
                                 let mut fileCached: bool = false;
+
+				/* If the file has been cached */
                                 if cache.contains_key_equiv(&tf.filepath.to_str()) {
+
                                         let cachedFile = cache.get(&tf.filepath.to_str());
+
                                         if *cachedFile.cacheTime as u64 > modifiedTime {
+
                                                 println(fmt!("begin serving cached file [%?]", tf.filepath));
-                                 // A web server should always reply a HTTP header for any legal HTTP request.
+                                 		// A web server should always reply a HTTP header for any legal HTTP request.
                                			tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());
+
                                                 if tf.filepath.to_str().contains(".shtml") {
                                                         let new_file_data = check_SSI(gash_whitelist ,cachedFile.filedata.clone()); //#
                                       			tf.stream.write(new_file_data);
                                                 }
-                                                else {
-                                                        tf.stream.write(cachedFile.filedata);
-                                                }
+                                                else { tf.stream.write(cachedFile.filedata); }
+
                                                 fileAccessTimes.insert(tf.filepath.to_str(), ~(time::get_time().sec * 1000 + time::get_time().nsec as i64/1000));
                                			println(fmt!("finish file [%?]", tf.filepath));
                                                 fileCached = true;
                                         }
                                 }
+
+				/* If the file has not been cached */
                                 if !fileCached {
                                          let file = io::read_whole_file(tf.filepath);
 
                                              match file { // killed if file size is larger than memory size.
 
                                                  Ok(file_data) =>
-                                                {
-                                                          println(fmt!("begin serving file [%?]", tf.filepath));
-                                                          // A web server should always reply a HTTP header for any legal HTTP request.
-                                                          tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes());        
+                                                 {
+                                                        println(fmt!("begin serving file [%?]", tf.filepath));
+                                                        // A web server should always reply a HTTP header for any legal HTTP request.
+                                                        tf.stream.write("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream; charset=UTF-8\r\n\r\n".as_bytes()); 
+       
                                                         let file_size = get_fileSize(tf.filepath);
+
                                                         if tf.filepath.to_str().contains(".shtml") {
                                                                 let new_file_data = check_SSI(gash_whitelist,file_data.clone()); //#
                                                                 tf.stream.write(new_file_data);
                                                         }
-                                                        else {
-                                                                tf.stream.write(file_data);
-                                                        }
+                                                        else { tf.stream.write(file_data);}
+
                                                         println(fmt!("finish file [%?]", tf.filepath));
                                                         
                                                         let cachedFile: cache_file = cache_file{filedata: file_data, cacheTime: ~time::get_time().sec};
 							let mut add: bool = false;
 							let mut qCount: HashMap<~str, int> = std::hashmap::HashMap::new();
-                                                        do take_pq.write |priority_Q| {
+                                                        
+							do take_pq.write |priority_Q| {
 								let pqClone = priority_Q.clone().to_vec();
 		                                                if file_size < maxCacheFileSize && maxCacheSize > 0 || 
 									pqClone.contains(&tf) {
@@ -248,7 +262,7 @@ fn main() {
                                                                                 None => {fail!("hash map iteration failed");}
                                                                         }
                                                                         i += 1;
-                                                                }
+                                                                } // while
                                                                 cache.remove(lowPriorityKey);
                                                                 fileAccessTimes.remove(lowPriorityKey);
                                                         }
@@ -294,7 +308,7 @@ fn main() {
 
 
     for stream in acceptor.incoming() {
-        let mut stream = stream; // @@@@@@
+        let mut stream = stream; 
         let mut peer_addr: ~str = ~"";
 
         match stream {
@@ -343,11 +357,14 @@ fn main() {
             if req_group.len() > 2 {
                 let path = req_group[1];
                 println(fmt!("Request for path: \n%?", path));
+
+
                 let mut newPath: ~str = path.replace("/../", "");
                 for i in range(0, path.len() / 4) {
                         newPath = newPath.replace("/../", "");
                 }
                 let file_path = ~os::getcwd().push(newPath);
+
 
                 if !os::path_exists(file_path) || os::path_is_dir(file_path)
                 {
@@ -357,26 +374,27 @@ fn main() {
                          do shared_count_copy.read |count|
                          {
                                    let response: ~str = fmt!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
-        <doctype !html><html>
-        <head><title>Hello, Rust!</title>
-        <style> body { background-color: #111; color: #FFEEAA }
-                 h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
-        h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
-        </style>
-        </head>
-        <body>
-        <h1>Greetings, Krusty!</h1>
-        <h2>Visitor count: %u</h2>
-        </body></html>\r\n", *count);
-                                stream.write(response.as_bytes());
-                              }
+                                	"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n
+        				<doctype !html><html>
+        				<head><title>Hello, Rust!</title>
+        				<style> body { background-color: #111; color: #FFEEAA }
+                 				h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red}
+        					h2 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm green}
+        				</style>
+        				</head>
+        				<body>
+        					<h1>Greetings, Krusty!</h1>
+        					<h2>Visitor count: %u</h2>
+        				</body></html>\r\n", *count);
+
+                                	stream.write(response.as_bytes());
+                         }
 
                 }
                 else {
                     // Requests scheduling
 
-                    let file_size:int = get_fileSize(file_path); // @@@@@@@@@@@
+                    let file_size:int = get_fileSize(file_path); 
 
                  // Rust 0.8 only provides a maximum priority queue
                  let mut adjusted_priority: int = (-1) * (log2( file_size as float) as int); // multiply priority by (-1) to use it as minimum priority queue
@@ -450,6 +468,18 @@ fn gash_handle(command: ~str) -> ~str {
         os::remove_file(temp_path);
         return output;
 }
+
+
+/*
+    ##################################################################################################################
+    ##################################################################################################################
+
+    Credit: Shell program taken from Pubilc-Reference-Solution/ps2/gash.rs
+
+    ##################################################################################################################
+    ##################################################################################################################
+
+*/
 
 fn get_fd(fpath: &str, mode: &str) -> libc::c_int {
     #[fixed_stack_segment]; #[inline(never)];
